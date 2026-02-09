@@ -1,6 +1,7 @@
 """Reasoning Engine: Handles task planning, execution reflection, and result verification"""
 
 import json
+from collections import deque
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from loguru import logger
@@ -94,11 +95,20 @@ class ReasoningEngine:
     3. verify_completion - Verify whether tasks are truly completed
     """
 
-    def __init__(self, provider: LLMProvider, model: str):
+    def __init__(self, provider: LLMProvider, model: str, max_history: int = 50):
+        """
+        Initialize the reasoning engine.
+
+        Args:
+            provider: LLM provider for plan/reflection/verification calls
+            model: Model name to use
+            max_history: Maximum number of history entries to keep (prevents memory leak)
+        """
         self.provider = provider
         self.model = model
-        self.planning_history: List[TaskPlan] = []
-        self.reflection_history: List[ReflectionResult] = []
+        # Use deque with maxlen to automatically discard old entries
+        self.planning_history: deque[TaskPlan] = deque(maxlen=max_history)
+        self.reflection_history: deque[ReflectionResult] = deque(maxlen=max_history)
 
     async def create_plan(
             self,
