@@ -200,6 +200,7 @@ class AgentLoop:
             plan = await self.reasoning.create_plan(
                 messages=messages,
                 task=msg.content,
+                available_tools=self.tools.get_simple_definitions(),
                 context=None  # Can pass additional context
             )
 

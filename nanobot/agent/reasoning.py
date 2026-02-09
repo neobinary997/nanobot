@@ -6,6 +6,7 @@ from dataclasses import dataclass, asdict
 from loguru import logger
 
 from nanobot.providers.base import LLMProvider
+from nanobot.agent.prompts import PromptTemplates
 
 
 @dataclass
@@ -103,6 +104,7 @@ class ReasoningEngine:
             self,
             messages: List[Dict[str, Any]],
             task: str,
+            available_tools: list[str],
             context: Optional[str] = None
     ) -> Optional[TaskPlan]:
         """
@@ -111,6 +113,7 @@ class ReasoningEngine:
         Args:
             messages: Conversation history
             task: Current task description
+            available_tools: Available tools
             context: Additional context information
 
         Returns:
@@ -118,8 +121,12 @@ class ReasoningEngine:
         """
         logger.info("Creating task plan...")
 
-        # Build planning prompt
-        planning_prompt = self._build_planning_prompt(task, context)
+        # Build planning prompt using template
+        planning_prompt = PromptTemplates.build_planning_prompt(
+            task=task,
+            available_tools=available_tools,
+            context=context
+        )
 
         # Call LLM to generate plan
         try:
@@ -145,46 +152,6 @@ class ReasoningEngine:
         except Exception as e:
             logger.error(f"Error creating plan: {e}")
             return None
-
-    def _build_planning_prompt(self, task: str, context: Optional[str] = None) -> str:
-        """Build planning prompt"""
-        prompt = f"""你是一个擅长任务规划的AI助手。请分析以下任务并制定详细的执行计划。
-
-任务：{task}
-"""
-
-        if context:
-            prompt += f"\n补充上下文：{context}\n"
-
-        prompt += """
-请按以下JSON格式输出计划：
-
-{
-  "goal": "任务的核心目标（一句话概括）",
-  "analysis": "任务分析：需要做什么？有哪些挑战？需要哪些信息？",
-  "steps": [
-    {
-      "id": 1,
-      "action": "具体要执行的操作（清晰、可执行）",
-      "tool": "需要使用的工具名称（如：web_search, read_file, exec, write_file等）",
-      "expected": "期望得到的结果",
-      "rationale": "为什么需要这一步？"
-    }
-  ],
-  "success_criteria": "如何判断任务真正完成？列出明确的标准",
-  "estimated_iterations": "预估需要的工具调用次数"
-}
-
-规划原则：
-1. 步骤要具体、可执行、有先后顺序
-2. 每步只做一件事，不要合并多个操作
-3. 考虑可能的失败情况和备选方案
-4. 步骤数量：简单任务2-3步，复杂任务5-8步
-5. tool字段必须是实际存在的工具名称
-
-请只输出JSON，不要其他内容。"""
-
-        return prompt
 
     def _parse_plan(self, llm_response: str, original_task: str) -> Optional[TaskPlan]:
         """Parse plan returned by LLM"""
@@ -256,32 +223,14 @@ class ReasoningEngine:
         """
         logger.info(f"Reflecting on step {step.id}: {step.action}")
 
-        reflection_prompt = f"""请反思刚才的执行步骤：
-
-计划的步骤：
-- 操作: {step.action}
-- 预期工具: {step.tool}
-- 预期结果: {step.expected}
-
-实际执行：
-- 使用的工具: {', '.join(actual_tools_used)}
-- 实际结果: {actual_result[:500]}
-
-请评估：
-1. 这一步是否成功？
-2. 结果是否符合预期？
-3. 有什么值得注意的洞察？
-4. 是否需要调整后续计划？
-
-输出JSON格式：
-{{
-  "success": true/false,
-  "insights": "关键洞察和发现",
-  "needs_adjustment": true/false,
-  "suggested_adjustment": "如果需要调整，建议如何调整"
-}}
-
-只输出JSON，不要其他内容。"""
+        # Build reflection prompt using template
+        reflection_prompt = PromptTemplates.build_reflection_prompt(
+            action=step.action,
+            expected_tool=step.tool,
+            expected_result=step.expected,
+            actual_tools=actual_tools_used,
+            actual_result=actual_result
+        )
 
         try:
             response = await self.provider.chat(
@@ -348,34 +297,12 @@ class ReasoningEngine:
         """
         logger.info("Verifying task completion...")
 
-        verification_prompt = f"""请验证任务是否真正完成。
-
-原始任务：
-{original_task}
-
-执行计划：
-{plan.to_readable_string()}
-
-最终结果：
-{final_result[:1000]}
-
-请从以下维度评估：
-1. 任务是否完成？（对照success_criteria）
-2. 完成质量如何？（0-1分）
-3. 是否有遗漏的项目？
-4. 是否有明显的问题或错误？
-5. 有什么改进建议？
-
-输出JSON格式：
-{{
-  "task_completed": true/false,
-  "quality_score": 0.0-1.0,
-  "missing_items": ["缺失项1", "缺失项2"],
-  "issues": ["问题1", "问题2"],
-  "recommendations": ["建议1", "建议2"]
-}}
-
-只输出JSON，不要其他内容。"""
+        # Build verification prompt using template
+        verification_prompt = PromptTemplates.build_verification_prompt(
+            original_task=original_task,
+            plan=plan.to_readable_string(),
+            final_result=final_result
+        )
 
         try:
             response = await self.provider.chat(
